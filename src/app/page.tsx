@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { FileUpload } from "@/components/file-upload";
 import { ReaderCardsModal } from "@/components/reader-cards-modal";
 import { ReaderFeedbackView } from "@/components/reader-feedback-view";
-import { parseAndAnalyzeDocument, fetchReaderFeedback } from "@/app/actions";
+import { fetchReaderFeedback } from "@/app/actions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -43,8 +43,18 @@ export default function Home() {
     try {
       const formData = new FormData();
       formData.set("file", selectedFile);
-      const data = await parseAndAnalyzeDocument(formData);
-      setResult(data);
+      const res = await fetch("/api/parse", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.error ?? "解析或分析失败");
+        return;
+      }
+      setResult({
+        extractedText: data.text,
+        filename: data.filename,
+        analysis: data.analysis,
+        suggestedReaders: data.suggestedReaders ?? [],
+      });
       setReaderModalOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "解析或分析失败");

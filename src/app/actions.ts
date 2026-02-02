@@ -1,38 +1,7 @@
 "use server";
 
-import { extractTextFromFile } from "@/lib/extract-text";
-import { analyzeDocumentWithLLM, getReaderFeedback } from "@/lib/llm";
-import type { ParseAndAnalyzeResult, ReaderFeedback, SuggestedReader } from "@/types/reader";
-
-export async function parseAndAnalyzeDocument(
-  formData: FormData
-): Promise<ParseAndAnalyzeResult> {
-  const file = formData.get("file") as File | null;
-  if (!file || !(file instanceof File) || file.size === 0) {
-    throw new Error("请选择有效的文件");
-  }
-
-  const name = file.name.toLowerCase();
-  if (!name.endsWith(".pdf") && !name.endsWith(".docx") && !name.endsWith(".doc")) {
-    throw new Error("仅支持 .pdf 或 .docx 文件");
-  }
-
-  const extractedText = await extractTextFromFile(file);
-  if (!extractedText.trim()) {
-    throw new Error("未能从文档中提取到文本");
-  }
-
-  const { analysis, suggestedReaders } = await analyzeDocumentWithLLM(
-    extractedText
-  );
-
-  return {
-    extractedText,
-    filename: file.name,
-    analysis,
-    suggestedReaders,
-  };
-}
+import { getReaderFeedback } from "@/lib/llm";
+import type { ReaderFeedback, SuggestedReader } from "@/types/reader";
 
 export async function fetchReaderFeedback(
   extractedText: string,

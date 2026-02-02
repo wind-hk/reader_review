@@ -1,36 +1,107 @@
-import { NextRequest, NextResponse } from 'next/server';
-import pdf from 'pdf-parse';
+/**
+ * 纯 API Route：解析上传的 PDF/Word，提取文本并交由 DeepSeek 分析。
+ * 先加载 DOMMatrix polyfill（Vercel 无 DOM），再加载 worker 设置（本地），仅用 pdf-parse + mammoth。
+ */
+import "@/lib/dommatrix-polyfill";
+import "@/lib/pdf-worker-setup";
+import { analyzeDocumentWithLLM } from "@/lib/llm";
+import { NextRequest, NextResponse } from "next/server";
+import { PDFParse } from "pdf-parse";
+import mammoth from "mammoth";
 
-export async function POST(req: NextRequest) {
+export const runtime = "nodejs";
+
+const PDF_MIME = "application/pdf";
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+function isPdf(type: string, name: string): boolean {
+  return type === PDF_MIME || name.toLowerCase().endsWith(".pdf");
+}
+
+function isDocx(type: string, name: string): boolean {
+  return (
+    type === DOCX_MIME ||
+    name.toLowerCase().endsWith(".docx") ||
+    name.toLowerCase().endsWith(".doc")
+  );
+}
+
+export async function POST(request: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get('file') as File;
-    
-    if (!file) return NextResponse.json({ error: "未找到文件" }, { status: 400 });
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+
+    if (!file || !(file instanceof File)) {
+      return NextResponse.json(
+        { error: "请上传文件", code: "MISSING_FILE" },
+        { status: 400 }
+      );
+    }
+
+    if (file.size === 0) {
+      return NextResponse.json(
+        { error: "上传文件为空", code: "EMPTY_FILE" },
+        { status: 400 }
+      );
+    }
+
+    const type = file.type;
+    const name = file.name.toLowerCase();
+
+    if (!isPdf(type, name) && !isDocx(type, name)) {
+      return NextResponse.json(
+        {
+          error: "仅支持 PDF 或 Word (.docx/.doc) 文件",
+          code: "UNSUPPORTED_TYPE",
+        },
+        { status: 400 }
+      );
+    }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    
-    // 使用 pdf-parse 提取文本，它不需要 DOMMatrix
-    const data = await pdf(buffer);
-    const text = data.text;
+    let text: string;
 
-    // 调用 DeepSeek API
-    const response = await fetch(`${process.env.DEEPSEEK_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "deepseek-chat",
-        messages: [{ role: "user", content: `请分析以下内容并给出读者反馈：${text}` }]
-      })
+    if (isPdf(type, name)) {
+      const parser = new PDFParse({ data: new Uint8Array(buffer) });
+      try {
+        const result = await parser.getText();
+        text = result?.text ?? "";
+      } finally {
+        await parser.destroy();
+      }
+    } else {
+      const result = await mammoth.extractRawText({ buffer });
+      text = result?.value ?? "";
+    }
+
+    const trimmed = (text ?? "").trim();
+    if (!trimmed) {
+      return NextResponse.json(
+        {
+          error: "未能从文档中提取到文本",
+          code: "NO_TEXT_EXTRACTED",
+        },
+        { status: 400 }
+      );
+    }
+
+    const { analysis, suggestedReaders } = await analyzeDocumentWithLLM(
+      trimmed
+    );
+
+    return NextResponse.json({
+      text: trimmed,
+      filename: file.name,
+      analysis,
+      suggestedReaders,
     });
-
-    const result = await response.json();
-    return NextResponse.json(result);
-  } catch (error: any) {
-    console.error("解析或分析失败:", error);
-    return NextResponse.json({ error: "服务器内部错误，请检查日志" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "解析或分析失败";
+    console.error("Parse/analyze error:", err);
+    return NextResponse.json(
+      { error: message, code: "PARSE_OR_ANALYSIS_FAILED" },
+      { status: 500 }
+    );
   }
 }

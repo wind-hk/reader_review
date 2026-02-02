@@ -1,3 +1,7 @@
+/**
+ * 与 /api/parse 一致：先加载 DOMMatrix polyfill 与 worker 设置，再解析并交由 DeepSeek 分析。
+ */
+import "@/lib/dommatrix-polyfill";
 import "@/lib/pdf-worker-setup";
 import { analyzeDocumentWithLLM } from "@/lib/llm";
 import { NextRequest, NextResponse } from "next/server";
