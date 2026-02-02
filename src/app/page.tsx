@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { FileUpload } from "@/components/file-upload";
 import { ReaderCardsModal } from "@/components/reader-cards-modal";
 import { ReaderFeedbackView } from "@/components/reader-feedback-view";
-import { fetchReaderFeedback } from "@/app/actions";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -73,8 +72,20 @@ export default function Home() {
       setLoadingReaderId(reader.id);
       setCurrentReaderId(reader.id);
       try {
-        const feedback = await fetchReaderFeedback(result.extractedText, reader);
-        setFeedbackByReaderId((prev) => ({ ...prev, [reader.id]: feedback }));
+        const res = await fetch("/api/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            extractedText: result.extractedText,
+            reader,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data?.error ?? "获取读者反馈失败");
+          return;
+        }
+        setFeedbackByReaderId((prev) => ({ ...prev, [reader.id]: data }));
       } catch (err) {
         setError(err instanceof Error ? err.message : "获取读者反馈失败");
       } finally {
